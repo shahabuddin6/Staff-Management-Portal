@@ -1,19 +1,22 @@
-// firebase.js
+// src/firebase.js
 import { initializeApp } from "firebase/app";
-import { getFirestore } from "firebase/firestore";
+// Import the specific SDKs you need for Auth and Database
 import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
-// Ye details aapko Firebase Console (Project Settings) se milengi
+// Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSy...",         // Apni wali yahan paste karein
-  authDomain: "xyz.firebaseapp.com",
-  projectId: "your-project-id", // Apni Project ID yahan paste karein
-  storageBucket: "...",
-  messagingSenderId: "...",
-  appId: "..."
+  apiKey: "AIzaSyDzdiia6x_JtqLNa2HXA_ryljXrjIyg6v4",
+  authDomain: "school-portal-69e2b.firebaseapp.com",
+  projectId: "school-portal-69e2b",
+  storageBucket: "school-portal-69e2b.firebasestorage.app",
+  messagingSenderId: "825534501732",
+  appId: "1:825534501732:web:c7ca75d1f386d4a19fe071"
 };
 
-// Yahan se aapka code connect hota hai
+// Initialize Firebase Core
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app); // Ye aapke Database ke liye hai
-export const auth = getAuth(app);    // Ye Sign In/Up ke liye hai
+
+// Initialize Firebase Authentication and Firestore Database, then EXPORT them
+export const auth = getAuth(app);
+export const db = getFirestore(app);

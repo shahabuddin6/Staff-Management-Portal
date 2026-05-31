@@ -1,137 +1,42 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, Calendar as CalendarIcon, DollarSign, Settings, 
   Menu, X, Plus, Edit2, Trash2, CheckCircle, XCircle, 
   AlertCircle, Clock, FileText, Printer, LogOut, Moon, Sun, Search,
-  Lock, Mail, User, Phone, Check, ArrowLeft, Upload, Image as ImageIcon,
-  CheckSquare, Activity
+  Lock, Mail, User, Phone, Check, ArrowLeft
 } from 'lucide-react';
 
-import { initializeApp } from 'firebase/app';
+// Import the configured Firebase instances you created in src/firebase.js
+import { auth, db } from './firebase';
 import { 
-  getFirestore, 
+  createUserWithEmailAndPassword, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
   collection, 
-  onSnapshot, 
-  addDoc, 
-  deleteDoc, 
   doc, 
-  updateDoc,
-  query,
-  setDoc,
-  getDocs
+  setDoc, 
+  getDoc, 
+  deleteDoc, 
+  onSnapshot 
 } from 'firebase/firestore';
 
-// Aapke Firebase real credentials yahan shamil kar diye gaye hain!
-const firebaseConfig = {
-  apiKey: "AIzaSyDEZvMAuLv-yI9UPGBHyWdjHaSrtcdIlws",
-  authDomain: "school-portal-fc749.firebaseapp.com",
-  projectId: "school-portal-fc749",
-  storageBucket: "school-portal-fc749.firebasestorage.app",
-  messagingSenderId: "641402900709",
-  appId: "1:641402900709:web:7ef99869ac79be19f1040c",
-  measurementId: "G-99YQBEY85K"
-};
-
-let db = null;
-let isFirebaseConnected = false;
-
-try {
-  if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY_HERE") {
-    const app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
-    isFirebaseConnected = true;
-    console.log("Firebase connected successfully!");
-  } else {
-    console.log("Firebase config not set. Using secure Local Storage fallback.");
-  }
-} catch (error) {
-  console.warn("Firebase connection failed, falling back to Local Storage mode:", error);
-}
-
-// --- MOCK INITIAL SEED DATA ---
-const initialTeachers = [
-  { id: '1', name: 'Ahmad Khan', phone: '03001234567', email: 'ahmad@school.edu.pk', subject: 'Mathematics', jam: '9th Grade', monthlySalary: 45000, joiningDate: '2023-01-15', status: 'Active', profilePhoto: null },
-  { id: '2', name: 'Sara Ali', phone: '03339876543', email: 'sara@school.edu.pk', subject: 'Physics', jam: '10th Grade', monthlySalary: 48000, joiningDate: '2022-08-01', status: 'Active', profilePhoto: null },
-  { id: '3', name: 'Usman Tariq', phone: '03451122334', email: 'usman@school.edu.pk', subject: 'English', jam: '8th Grade', monthlySalary: 40000, joiningDate: '2024-02-10', status: 'Active', profilePhoto: null }
-];
-
-const initialAdmins = [
-  { email: 'admin@school.com', password: 'admin123', name: 'School Admin' }
-];
-
+// Helper to get current date in YYYY-MM-DD
 const getTodayString = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-// Yeh wrapper functions automatic stream control karti hain (Firebase ya Local Storage)
-const dbSync = {
-  subscribeToCollection: (collectionName, fallbackData, callback) => {
-    if (isFirebaseConnected && db) {
-      const q = query(collection(db, collectionName));
-      return onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        callback(list);
-      }, (err) => {
-        console.error(`Error reading ${collectionName} from Firebase:`, err);
-        callback(fallbackData);
-      });
-    } else {
-      // Local Storage Mode
-      const localData = localStorage.getItem(`tms_${collectionName}`);
-      if (localData) {
-        callback(JSON.parse(localData));
-      } else {
-        localStorage.setItem(`tms_${collectionName}`, JSON.stringify(fallbackData));
-        callback(fallbackData);
-      }
-      return () => {};
-    }
-  },
-
-  addItem: async (collectionName, item) => {
-    if (isFirebaseConnected && db) {
-      const docRef = await addDoc(collection(db, collectionName), item);
-      return docRef.id;
-    } else {
-      const localData = JSON.parse(localStorage.getItem(`tms_${collectionName}`) || '[]');
-      const newItem = { id: Date.now().toString(), ...item };
-      const updated = [...localData, newItem];
-      localStorage.setItem(`tms_${collectionName}`, JSON.stringify(updated));
-      window.dispatchEvent(new Event('local_db_update'));
-      return newItem.id;
-    }
-  },
-
-  updateItem: async (collectionName, itemId, updatedFields) => {
-    if (isFirebaseConnected && db) {
-      await updateDoc(doc(db, collectionName, itemId), updatedFields);
-    } else {
-      const localData = JSON.parse(localStorage.getItem(`tms_${collectionName}`) || '[]');
-      const updated = localData.map(item => item.id === itemId ? { ...item, ...updatedFields } : item);
-      localStorage.setItem(`tms_${collectionName}`, JSON.stringify(updated));
-      window.dispatchEvent(new Event('local_db_update'));
-    }
-  },
-
-  deleteItem: async (collectionName, itemId) => {
-    if (isFirebaseConnected && db) {
-      await deleteDoc(doc(db, collectionName, itemId));
-    } else {
-      const localData = JSON.parse(localStorage.getItem(`tms_${collectionName}`) || '[]');
-      const updated = localData.filter(item => item.id !== itemId);
-      localStorage.setItem(`tms_${collectionName}`, JSON.stringify(updated));
-      window.dispatchEvent(new Event('local_db_update'));
-    }
-  }
-};
-
+// --- CUSTOM HOOK FOR LOCAL STORAGE (Kept only for theme preference) ---
 function useLocalStorage(key, initialValue) {
   const [storedValue, setStoredValue] = useState(() => {
     try {
       const item = window.localStorage.getItem(key);
       return item ? JSON.parse(item) : initialValue;
     } catch (error) {
+      console.error(error);
       return initialValue;
     }
   });
@@ -148,10 +53,38 @@ function useLocalStorage(key, initialValue) {
   return [storedValue, setValue];
 }
 
+// --- MAIN APPLICATION COMPONENT ---
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useLocalStorage('tms_auth', false);
-  const [currentUser, setCurrentUser] = useLocalStorage('tms_user', null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [theme, setTheme] = useLocalStorage('tms_theme', 'light');
+
+  // Listen to the global authentication state from Firebase (Syncs Mobile A & Mobile B instantly)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // Pull the administrator's profile name from Firestore
+          const docRef = doc(db, "admins", user.uid);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+            setCurrentUser({ uid: user.uid, ...docSnap.data() });
+          } else {
+            setCurrentUser({ uid: user.uid, email: user.email, name: "School Admin" });
+          }
+        } catch (err) {
+          console.error("Error fetching admin profile:", err);
+          setCurrentUser({ uid: user.uid, email: user.email, name: "School Admin" });
+        }
+      } else {
+        setCurrentUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -163,90 +96,62 @@ export default function App() {
 
   const toggleTheme = () => setTheme(theme === 'light' ? 'dark' : 'light');
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 text-gray-500 dark:text-gray-400">
+        <div className="text-center space-y-2">
+          <Clock className="w-8 h-8 animate-spin mx-auto text-blue-600" />
+          <p className="text-sm font-medium">Connecting to Cloud Server...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <AuthContainer 
+        theme={theme} 
+        toggleTheme={toggleTheme} 
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors duration-200">
-      {!isAuthenticated ? (
-        <AuthContainer 
-          onLogin={(user) => {
-            setIsAuthenticated(true);
-            setCurrentUser(user);
-          }} 
-          theme={theme} 
-          toggleTheme={toggleTheme} 
-        />
-      ) : (
-        <MainDashboard 
-          onLogout={() => {
-            setIsAuthenticated(false);
-            setCurrentUser(null);
-          }} 
-          currentUser={currentUser}
-          theme={theme} 
-          toggleTheme={toggleTheme} 
-        />
-      )}
-    </div>
+    <MainDashboard 
+      onLogout={() => signOut(auth)} 
+      currentUser={currentUser}
+      theme={theme} 
+      toggleTheme={toggleTheme} 
+    />
   );
 }
 
-function NotificationToast({ message, type, onClose }) {
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onClose();
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
+// --- AUTH CONTAINER STATE MACHINE ---
+function AuthContainer({ theme, toggleTheme }) {
+  const [authView, setAuthView] = useState('signin'); // 'signin', 'signup', 'forgot'
 
   return (
-    <div className={`fixed bottom-4 right-4 z-50 flex items-center gap-3 p-4 rounded-xl shadow-xl border animate-bounce ${
-      type === 'success' 
-        ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950/90 dark:border-emerald-800 dark:text-emerald-300'
-        : 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/90 dark:border-rose-800 dark:text-rose-300'
-    }`}>
-      {type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
-      <span className="font-medium text-sm">{message}</span>
-      <button onClick={onClose} className="p-1 hover:bg-black/5 rounded-full"><X size={14}/></button>
-    </div>
-  );
-}
-
-function AuthContainer({ onLogin, theme, toggleTheme }) {
-  const [authView, setAuthView] = useState('signin'); 
-  const [admins, setAdmins] = useState(initialAdmins); // useLocalStorage hata kar useState lagaya
-  const [rememberMeCreds, setRememberMeCreds] = useLocalStorage('tms_remember_me', null);
-
-  // Firebase Cloud se live sync karne ke liye yeh useEffect lagaya:
-  useEffect(() => {
-    const unsubAdmins = dbSync.subscribeToCollection('admins', initialAdmins, (data) => {
-      setAdmins(data);
-    });
-    return () => unsubAdmins();
-  }, []);
-
-  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 transition-colors duration-200 px-4 relative">
+      <div className="absolute top-4 right-4">
+        <button onClick={toggleTheme} className="p-2.5 rounded-full bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-gray-200 transition-all hover:scale-105">
+          {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+        </button>
+      </div>
 
       <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-100 dark:border-gray-700 transition-all">
         {authView === 'signin' && (
           <SignInForm 
-            onLogin={onLogin} 
             setAuthView={setAuthView} 
-            admins={admins} 
-            rememberMeCreds={rememberMeCreds}
-            setRememberMeCreds={setRememberMeCreds}
           />
         )}
         {authView === 'signup' && (
           <SignUpForm 
             setAuthView={setAuthView} 
-            admins={admins} 
-            setAdmins={setAdmins} 
           />
         )}
         {authView === 'forgot' && (
           <ForgotPasswordForm 
             setAuthView={setAuthView} 
-            admins={admins} 
-            setAdmins={setAdmins}
           />
         )}
       </div>
@@ -254,64 +159,29 @@ function AuthContainer({ onLogin, theme, toggleTheme }) {
   );
 }
 
-function SignInForm({ onLogin, setAuthView, admins, rememberMeCreds, setRememberMeCreds }) {
+// --- 1. SIGN IN FORM ---
+function SignInForm({ setAuthView }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (rememberMeCreds) {
-      setEmail(rememberMeCreds.email);
-      setPassword(rememberMeCreds.password);
-      setRememberMe(true);
-    }
-  }, [rememberMeCreds]);
-
-  // --- NAYA CODE (ADDED): Firebase se direct verification ---
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
-    
-    try {
-      // 1. Firebase se fresh admins ki list directly fetch karein
-      const querySnapshot = await getDocs(collection(db, 'admins'));
-      
-      if (querySnapshot.empty) {
-        setError('Database mein koi admins nahi mile (Collection khali hai).');
-        return;
-      }
 
-      const freshAdminsList = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      
-      // 2. Ab check karein ke email aur password cloud data se match hota hai ya nahi
-      const matchedAdmin = freshAdminsList.find(admin => 
-        admin.email?.toLowerCase() === email.trim().toLowerCase() && admin.password === password
-      );
-      
-      if (matchedAdmin) {
-        if (rememberMe) {
-          setRememberMeCreds({ email, password });
-        } else {
-          setRememberMeCreds(null);
-        }
-        onLogin(matchedAdmin); // Login successful!
-      } else {
-        // Agar match nahi hua toh exact check karein ke masla kahan hai
-        const emailExists = freshAdminsList.some(admin => admin.email?.toLowerCase() === email.trim().toLowerCase());
-        if (emailExists) {
-          setError('Password galat hai. Dobara check karein.');
-        } else {
-          setError('Yeh email database mein registered nahi hai.');
-        }
-      }
+    try {
+      // Direct Firebase Cloud verification
+      await signInWithEmailAndPassword(auth, email, password);
     } catch (err) {
-      console.error("Login error:", err);
-      setError(`Database Error: ${err.message || 'Connection issue'}`);
+      console.error(err);
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setError('Invalid email or password configuration.');
+      } else {
+        setError(err.message.replace("Firebase:", ""));
+      }
     }
   };
 
-  // --- AAPKA PREMIUM DESIGN INTERFACE ---
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -360,16 +230,7 @@ function SignInForm({ onLogin, setAuthView, admins, rememberMeCreds, setRemember
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-sm">
-          <label className="flex items-center space-x-2 cursor-pointer select-none">
-            <input 
-              type="checkbox" 
-              className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4 border-gray-300 dark:bg-gray-700 dark:border-gray-600"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-            />
-            <span className="text-gray-600 dark:text-gray-400">Remember Me</span>
-          </label>
+        <div className="flex items-center justify-end text-sm">
           <button 
             type="button" 
             onClick={() => setAuthView('forgot')}
@@ -396,7 +257,16 @@ function SignInForm({ onLogin, setAuthView, admins, rememberMeCreds, setRemember
   );
 }
 
-const handleSignUp = async (e) => {
+// --- 2. SIGN UP FORM ---
+function SignUpForm({ setAuthView }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const handleSignUp = async (e) => {
     e.preventDefault();
     setError('');
 
@@ -405,42 +275,30 @@ const handleSignUp = async (e) => {
       return;
     }
 
-    const emailExists = admins.some(admin => admin.email.toLowerCase() === email.toLowerCase());
-    if (emailExists) {
-      setError('An account with this email already exists.');
-      return;
-    }
-
-    const newAdmin = { name, email: email.toLowerCase(), password };
     try {
-      // Ab data local memory ke bajaye Firebase Cloud database mein save hoga
-      await dbSync.addItem('admins', newAdmin);
+      // 1. Create credential user globally inside Firebase Auth backend
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // 2. Set structural administrative dynamic metadata profiles inside Cloud Firestore
+      await setDoc(doc(db, "admins", user.uid), {
+        name: name,
+        email: email.toLowerCase(),
+        createdAt: new Date().toISOString()
+      });
+
       setSuccess(true);
       setTimeout(() => {
         setAuthView('signin');
       }, 2000);
     } catch (err) {
-      setError('Database error. Please try again.');
+      console.error(err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError('An account with this email already exists.');
+      } else {
+        setError(err.message.replace("Firebase:", ""));
+      }
     }
-  };
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
-
-    const emailExists = admins.some(admin => admin.email.toLowerCase() === email.toLowerCase());
-    if (emailExists) {
-      setError('An account with this email already exists.');
-      return;
-    }
-
-    const newAdmin = { name, email: email.toLowerCase(), password };
-    setAdmins([...admins, newAdmin]);
-    setSuccess(true);
-    setTimeout(() => {
-      setAuthView('signin');
-    }, 2000);
   };
 
   return (
@@ -534,25 +392,21 @@ const handleSignUp = async (e) => {
   );
 }
 
-function ForgotPasswordForm({ setAuthView, admins, setAdmins }) {
+// --- 3. FORGOT PASSWORD FORM (Uses Simulation) ---
+function ForgotPasswordForm({ setAuthView }) {
   const [email, setEmail] = useState('');
-  const [step, setStep] = useState(1); 
+  const [step, setStep] = useState(1);
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
 
-  const simulatedOTP = "123456"; 
+  const simulatedOTP = "123456";
 
   const handleSendOTP = (e) => {
     e.preventDefault();
     setError('');
-    const matchedAdmin = admins.find(admin => admin.email.toLowerCase() === email.toLowerCase());
-    if (!matchedAdmin) {
-      setError('This email is not registered with any admin account.');
-      return;
-    }
     setInfoMessage(`A security simulation reset OTP has been triggered. Please use simulated OTP: ${simulatedOTP}`);
     setStep(2);
   };
@@ -568,28 +422,17 @@ function ForgotPasswordForm({ setAuthView, admins, setAdmins }) {
     setStep(3);
   };
 
-  const handleResetPassword = async (e) => {
+  const handleResetPassword = (e) => {
     e.preventDefault();
     setError('');
-
     if (newPassword !== confirmNewPassword) {
       setError('Passwords do not match.');
       return;
     }
-
-    const matchedAdmin = admins.find(admin => admin.email.toLowerCase() === email.toLowerCase());
-    if (matchedAdmin) {
-      try {
-        // Ab password local memory ke bajaye Firebase Cloud database mein update hoga
-        await dbSync.updateItem('admins', matchedAdmin.id, { password: newPassword });
-        setInfoMessage('Password updated successfully! Redirecting...');
-        setTimeout(() => {
-          setAuthView('signin');
-        }, 2000);
-      } catch (err) {
-        setError('Failed to update password in cloud database.');
-      }
-    }
+    setInfoMessage('Password updated successfully via application simulation!');
+    setTimeout(() => {
+      setAuthView('signin');
+    }, 2000);
   };
 
   return (
@@ -693,39 +536,43 @@ function ForgotPasswordForm({ setAuthView, admins, setAdmins }) {
   );
 }
 
+// --- MAIN DASHBOARD LAYOUT ---
 function MainDashboard({ onLogout, currentUser, theme, toggleTheme }) {
   const [teachers, setTeachers] = useState([]);
-  const [attendance, setAttendance] = useState([]);
+  const [attendance, setAttendance] = useState([]); 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [localUpdateTrigger, setLocalUpdateTrigger] = useState(0);
 
-  // Synchronizing Cloud/Local Data Stream on mount and updates
+  // Hook up real-time server streams. Updates made on Mobile A show up instantly on Mobile B!
   useEffect(() => {
-    const unsubTeachers = dbSync.subscribeToCollection('teachers', initialTeachers, (data) => {
-      setTeachers(data);
-    });
-    const unsubAttendance = dbSync.subscribeToCollection('attendance', [], (data) => {
-      setAttendance(data);
-    });
+    // 1. Listen for real-time changes to the teachers collection
+    const unsubscribeTeachers = onSnapshot(collection(db, "teachers"), (snapshot) => {
+      const teachersList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setTeachers(teachersList);
+    }, (error) => console.error("Teachers sync error:", error));
 
-    const handleLocalUpdate = () => {
-      setLocalUpdateTrigger(prev => prev + 1);
-    };
-
-    window.addEventListener('local_db_update', handleLocalUpdate);
+    // 2. Listen for real-time changes to the attendance collection
+    const unsubscribeAttendance = onSnapshot(collection(db, "attendance"), (snapshot) => {
+      const attendanceList = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAttendance(attendanceList);
+    }, (error) => console.error("Attendance sync error:", error));
 
     return () => {
-      unsubTeachers();
-      unsubAttendance();
-      window.removeEventListener('local_db_update', handleLocalUpdate);
+      unsubscribeTeachers();
+      unsubscribeAttendance();
     };
-  }, [localUpdateTrigger]);
+  }, []);
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: CalendarIcon },
     { id: 'teachers', label: 'Teachers', icon: Users },
-    { id: 'attendance', label: 'Attendance', icon: CheckSquare },
+    { id: 'attendance', label: 'Attendance', icon: CheckCircle },
     { id: 'salary', label: 'Salary & Payroll', icon: DollarSign },
   ];
 
@@ -744,18 +591,6 @@ function MainDashboard({ onLogout, currentUser, theme, toggleTheme }) {
           </div>
         </div>
         
-        {/* Connection Status indicator */}
-        <div className="px-4 pt-4">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold ${
-            isFirebaseConnected 
-              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400' 
-              : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
-          }`}>
-            <Activity size={14} className={isFirebaseConnected ? 'animate-pulse' : ''} />
-            <span>{isFirebaseConnected ? 'Cloud Sync Online' : 'Device Storage Mode'}</span>
-          </div>
-        </div>
-
         {/* User Info */}
         <div className="p-4 mx-4 my-3 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
           <p className="text-xs text-gray-400 dark:text-gray-500 font-semibold uppercase tracking-wider">Signed In As</p>
@@ -839,6 +674,7 @@ function MainDashboard({ onLogout, currentUser, theme, toggleTheme }) {
   );
 }
 
+// --- DASHBOARD SUB-VIEW ---
 function DashboardView({ teachers, attendance }) {
   const today = getTodayString();
   const activeTeachers = teachers.filter(t => t.status === 'Active');
@@ -892,23 +728,23 @@ function DashboardView({ teachers, attendance }) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
           <h2 className="text-lg font-semibold mb-4">Quick Actions</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4">
              <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg flex items-center space-x-4">
                 <div className="p-3 bg-indigo-100 text-indigo-600 rounded-full dark:bg-indigo-900/50 dark:text-indigo-400">
-                  <Clock size={24} />
+                  <ScanLine size={24} />
                 </div>
                 <div>
                   <h3 className="font-medium">Biometric Sync</h3>
-                  <p className="text-xs text-gray-500">Auto synchronized</p>
+                  <p className="text-xs text-gray-500">Ready for integration</p>
                 </div>
              </div>
              <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg flex items-center space-x-4">
                 <div className="p-3 bg-teal-100 text-teal-600 rounded-full dark:bg-teal-900/50 dark:text-teal-400">
-                  <CheckSquare size={24} />
+                  <QrCode size={24} />
                 </div>
                 <div>
-                  <h3 className="font-medium">Direct Attendance</h3>
-                  <p className="text-xs text-gray-500">Bulk register active</p>
+                  <h3 className="font-medium">QR Scanner</h3>
+                  <p className="text-xs text-gray-500">Ready for integration</p>
                 </div>
              </div>
           </div>
@@ -947,96 +783,34 @@ function StatCard({ title, value, icon: Icon, color }) {
   );
 }
 
-function FormPhotoUpload({ profilePhoto, setProfilePhoto, error, setError }) {
-  const fileInputRef = useRef(null);
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-    if (!allowedTypes.includes(file.type)) {
-      setError('Accept only PNG, JPG, JPEG, or WEBP.');
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      setError('Maximum image size allowed is 2MB.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setProfilePhoto(reader.result);
-      setError('');
-    };
-    reader.readAsDataURL(file);
-  };
-
-  return (
-    <div className="flex flex-col items-center gap-2 pb-2">
-      <div className="relative group w-24 h-24 rounded-full border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center bg-gray-50 dark:bg-gray-700 overflow-hidden shadow transition-all duration-300">
-        {profilePhoto ? (
-          <img src={profilePhoto} alt="Preview" className="w-full h-full object-cover transition-transform duration-300 transform group-hover:scale-105" />
-        ) : (
-          <div className="text-center text-gray-400">
-            <ImageIcon className="mx-auto mb-1" size={24} />
-            <span className="text-[10px] block">No Photo</span>
-          </div>
-        )}
-        <div 
-          onClick={() => fileInputRef.current.click()}
-          className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer duration-200"
-        >
-          <Upload className="text-white w-5 h-5" />
-        </div>
-      </div>
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        className="hidden" 
-        accept="image/png, image/jpeg, image/jpg, image/webp" 
-        onChange={handleFileChange} 
-      />
-      {profilePhoto ? (
-        <button 
-          type="button" 
-          onClick={() => setProfilePhoto(null)} 
-          className="text-xs text-rose-500 hover:text-rose-600 font-semibold"
-        >
-          Remove Photo
-        </button>
-      ) : (
-        <span className="text-xs text-gray-400">Profile Picture (Max 2MB)</span>
-      )}
-      {error && <span className="text-xs text-rose-500 font-medium text-center">{error}</span>}
-    </div>
-  );
+// Custom simple SVGs
+function ScanLine(props) {
+  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>;
+}
+function QrCode(props) {
+  return <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/></svg>;
 }
 
+// --- TEACHERS VIEW (Uses Cloud Firestore Writes) ---
 function TeachersView({ teachers }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [imgError, setImgError] = useState('');
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(null);
-  const [toast, setToast] = useState(null);
   const [formData, setFormData] = useState({
-    name: '', phone: '', email: '', subject: '', jam: '', monthlySalary: '', joiningDate: '', status: 'Active', profilePhoto: null
+    name: '', phone: '', email: '', subject: '', monthlySalary: '', joiningDate: '', status: 'Active'
   });
 
   const filteredTeachers = teachers.filter(t => 
-    t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.subject.toLowerCase().includes(searchTerm.toLowerCase())
+    t.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    t.subject?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const openModal = (teacher = null) => {
-    setImgError('');
     if (teacher) {
       setFormData(teacher);
       setEditingId(teacher.id);
     } else {
-      setFormData({ name: '', phone: '', email: '', subject: '', jam: '', monthlySalary: '', joiningDate: '', status: 'Active', profilePhoto: null });
+      setFormData({ name: '', phone: '', email: '', subject: '', monthlySalary: '', joiningDate: '', status: 'Active' });
       setEditingId(null);
     }
     setIsModalOpen(true);
@@ -1045,36 +819,36 @@ function TeachersView({ teachers }) {
   const handleSave = async (e) => {
     e.preventDefault();
     try {
-      if (editingId) {
-        await dbSync.updateItem('teachers', editingId, formData);
-        setToast({ message: 'Teacher updated successfully!', type: 'success' });
-      } else {
-        await dbSync.addItem('teachers', formData);
-        setToast({ message: 'Teacher added successfully!', type: 'success' });
-      }
+      const teacherId = editingId || Date.now().toString();
+      // Write the data payload directly to Cloud Firestore collection "teachers"
+      await setDoc(doc(db, "teachers", teacherId), {
+        name: formData.name,
+        phone: formData.phone,
+        email: formData.email,
+        subject: formData.subject,
+        monthlySalary: Number(formData.monthlySalary),
+        joiningDate: formData.joiningDate,
+        status: formData.status
+      });
       setIsModalOpen(false);
-    } catch (error) {
-      console.error("Error storing details in database: ", error);
-      setToast({ message: 'Operation failed. Try again.', type: 'error' });
+    } catch (err) {
+      console.error("Error saving teacher profile to Firestore:", err);
+      alert("Failed to save teacher to cloud storage. Please check permissions.");
     }
   };
 
-  const confirmDelete = async () => {
-    if (showDeleteConfirm) {
+  const handleDelete = async (id) => {
+    if(window.confirm('Are you sure you want to remove this teacher globally from the cloud?')) {
       try {
-        await dbSync.deleteItem('teachers', showDeleteConfirm);
-        setToast({ message: 'Teacher removed successfully.', type: 'success' });
-      } catch (error) {
-        setToast({ message: 'Error deleting teacher.', type: 'error' });
+        await deleteDoc(doc(db, "teachers", id));
+      } catch (err) {
+        console.error("Deletion error:", err);
       }
-      setShowDeleteConfirm(null);
     }
   };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {toast && <NotificationToast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-bold">Manage Staff</h1>
         <div className="flex w-full sm:w-auto space-x-3">
@@ -1099,10 +873,8 @@ function TeachersView({ teachers }) {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700">
-                <th className="px-6 py-4 font-semibold text-sm">Profile</th>
                 <th className="px-6 py-4 font-semibold text-sm">Name</th>
                 <th className="px-6 py-4 font-semibold text-sm">Subject</th>
-                <th className="px-6 py-4 font-semibold text-sm">Jam (Class)</th>
                 <th className="px-6 py-4 font-semibold text-sm">Contact</th>
                 <th className="px-6 py-4 font-semibold text-sm">Salary (PKR)</th>
                 <th className="px-6 py-4 font-semibold text-sm">Status</th>
@@ -1113,17 +885,6 @@ function TeachersView({ teachers }) {
               {filteredTeachers.map(teacher => (
                 <tr key={teacher.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                   <td className="px-6 py-4">
-                    {teacher.profilePhoto ? (
-                      <div className="w-10 h-10 rounded-full overflow-hidden border border-gray-200 shadow-sm">
-                        <img src={teacher.profilePhoto} className="w-full h-full object-cover" alt="Profile" />
-                      </div>
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-700 dark:text-blue-300 font-bold shadow-sm">
-                        {teacher.name.charAt(0)}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-6 py-4">
                     <div className="font-medium text-gray-900 dark:text-white">{teacher.name}</div>
                     <div className="text-xs text-gray-500">Joined: {teacher.joiningDate}</div>
                   </td>
@@ -1132,7 +893,6 @@ function TeachersView({ teachers }) {
                       {teacher.subject}
                     </span>
                   </td>
-                  <td className="px-6 py-4 font-medium">{teacher.jam || '-'}</td>
                   <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                     <div>{teacher.phone}</div>
                     <div className="text-xs">{teacher.email}</div>
@@ -1149,7 +909,7 @@ function TeachersView({ teachers }) {
                     <button onClick={() => openModal(teacher)} className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-gray-700 rounded-lg transition-colors">
                       <Edit2 size={16} />
                     </button>
-                    <button onClick={() => setShowDeleteConfirm(teacher.id)} className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                    <button onClick={() => handleDelete(teacher.id)} className="p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-gray-700 rounded-lg transition-colors">
                       <Trash2 size={16} />
                     </button>
                   </td>
@@ -1157,7 +917,7 @@ function TeachersView({ teachers }) {
               ))}
               {filteredTeachers.length === 0 && (
                 <tr>
-                  <td colSpan="8" className="px-6 py-8 text-center text-gray-500">No teachers found.</td>
+                  <td colSpan="6" className="px-6 py-8 text-center text-gray-500">No teachers found.</td>
                 </tr>
               )}
             </tbody>
@@ -1165,73 +925,45 @@ function TeachersView({ teachers }) {
         </div>
       </div>
 
-      {/* Custom Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100 dark:border-gray-700">
-            <h3 className="text-lg font-bold mb-2">Confirm Delete</h3>
-            <p className="text-sm text-gray-500 mb-6">Are you sure you want to delete this teacher? This action is permanent.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setShowDeleteConfirm(null)} className="flex-1 py-2 border rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
-              <button onClick={confirmDelete} className="flex-1 py-2 bg-rose-600 text-white rounded-xl hover:bg-rose-700">Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
               <h2 className="text-lg font-bold">{editingId ? 'Edit Teacher' : 'Add New Teacher'}</h2>
               <button onClick={() => setIsModalOpen(false)} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"><X size={20}/></button>
             </div>
-            <form onSubmit={handleSave} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-              
-              <FormPhotoUpload 
-                profilePhoto={formData.profilePhoto} 
-                setProfilePhoto={(img) => setFormData({...formData, profilePhoto: img})} 
-                error={imgError}
-                setError={setImgError}
-              />
-
+            <form onSubmit={handleSave} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-medium mb-1">Full Name</label>
-                <input required type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.name || ''} onChange={e => setFormData({...formData, name: e.target.value})} />
+                <input required type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Phone</label>
-                  <input required type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.phone || ''} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                  <input required type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Subject</label>
-                  <input required type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.subject || ''} onChange={e => setFormData({...formData, subject: e.target.value})} />
+                  <input required type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.subject} onChange={e => setFormData({...formData, subject: e.target.value})} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Jam (Class)</label>
-                  <input placeholder="e.g. 9th Grade" type="text" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.jam || ''} onChange={e => setFormData({...formData, jam: e.target.value})} />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Email</label>
-                  <input type="email" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.email || ''} onChange={e => setFormData({...formData, email: e.target.value})} />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input type="email" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">Monthly Salary (PKR)</label>
-                  <input required type="number" min="0" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.monthlySalary || ''} onChange={e => setFormData({...formData, monthlySalary: e.target.value})} />
+                  <input required type="number" min="0" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.monthlySalary} onChange={e => setFormData({...formData, monthlySalary: e.target.value})} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Joining Date</label>
-                  <input required type="date" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.joiningDate || ''} onChange={e => setFormData({...formData, joiningDate: e.target.value})} />
+                  <input required type="date" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.joiningDate} onChange={e => setFormData({...formData, joiningDate: e.target.value})} />
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-1">Status</label>
-                <select className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.status || 'Active'} onChange={e => setFormData({...formData, status: e.target.value})}>
+                <select className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 focus:ring-2 focus:ring-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
                 </select>
@@ -1248,23 +980,22 @@ function TeachersView({ teachers }) {
   );
 }
 
+// --- ATTENDANCE VIEW (Uses Cloud Firestore Writes) ---
 function AttendanceView({ teachers, attendance }) {
   const [selectedDate, setSelectedDate] = useState(getTodayString());
-  const [toast, setToast] = useState(null);
   const activeTeachers = teachers.filter(t => t.status === 'Active');
 
   const handleStatusChange = async (teacherId, status) => {
-    const record = attendance.find(a => a.teacherId === teacherId && a.date === selectedDate);
     try {
-      if (record) {
-        await dbSync.updateItem('attendance', record.id, { status });
-      } else {
-        await dbSync.addItem('attendance', { teacherId, date: selectedDate, status });
-      }
-      setToast({ message: 'Attendance status updated.', type: 'success' });
+      // Create a unique composite reference key based on teacher ID and date
+      const recordId = `${teacherId}_${selectedDate}`;
+      await setDoc(doc(db, "attendance", recordId), {
+        teacherId,
+        date: selectedDate,
+        status
+      });
     } catch (err) {
-      console.error("Attendance writing failed: ", err);
-      setToast({ message: 'Error marking attendance.', type: 'error' });
+      console.error("Firestore writing error during attendance marking:", err);
     }
   };
 
@@ -1275,18 +1006,18 @@ function AttendanceView({ teachers, attendance }) {
 
   const markAll = async (status) => {
     try {
-      for (const teacher of activeTeachers) {
-        const record = attendance.find(a => a.teacherId === teacher.id && a.date === selectedDate);
-        if (record) {
-          await dbSync.updateItem('attendance', record.id, { status });
-        } else {
-          await dbSync.addItem('attendance', { teacherId: teacher.id, date: selectedDate, status });
-        }
-      }
-      setToast({ message: `Successfully marked all as ${status}!`, type: 'success' });
+      // Loop through all active records and update Firestore
+      const promises = activeTeachers.map(teacher => {
+        const recordId = `${teacher.id}_${selectedDate}`;
+        return setDoc(doc(db, "attendance", recordId), {
+          teacherId: teacher.id,
+          date: selectedDate,
+          status
+        });
+      });
+      await Promise.all(promises);
     } catch (err) {
-      console.error(err);
-      setToast({ message: 'Error updating multiple registers.', type: 'error' });
+      console.error("Batch update error:", err);
     }
   };
 
@@ -1300,8 +1031,6 @@ function AttendanceView({ teachers, attendance }) {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {toast && <NotificationToast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
         <div>
           <h1 className="text-2xl font-bold">Daily Attendance</h1>
@@ -1321,7 +1050,7 @@ function AttendanceView({ teachers, attendance }) {
         <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex justify-between items-center">
           <h2 className="font-semibold">Staff List ({activeTeachers.length})</h2>
           <div className="space-x-2 text-sm">
-            <span className="text-gray-500 hidden sm:inline-block">Quick Mark All:</span>
+            <span className="text-gray-500">Quick Mark All:</span>
             <button onClick={() => markAll('Present')} className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-md hover:bg-emerald-200 dark:bg-emerald-900/50 dark:text-emerald-300 transition-colors">Present</button>
             <button onClick={() => markAll('Absent')} className="px-3 py-1 bg-rose-100 text-rose-800 rounded-md hover:bg-rose-200 dark:bg-rose-900/50 dark:text-rose-300 transition-colors">Absent</button>
           </div>
@@ -1333,16 +1062,12 @@ function AttendanceView({ teachers, attendance }) {
             return (
               <div key={teacher.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors gap-4">
                 <div className="flex items-center space-x-3">
-                  {teacher.profilePhoto ? (
-                    <img src={teacher.profilePhoto} className="w-10 h-10 rounded-full object-cover shadow border border-gray-100" alt="Attendance Avatar" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-700 dark:text-blue-300 font-bold shadow-sm">
-                      {teacher.name.charAt(0)}
-                    </div>
-                  )}
+                  <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-700 dark:text-blue-300 font-bold">
+                    {teacher.name ? teacher.name.charAt(0) : 'T'}
+                  </div>
                   <div>
                     <div className="font-medium">{teacher.name}</div>
-                    <div className="text-xs text-gray-500">{teacher.subject} {teacher.jam ? `(${teacher.jam})` : ''}</div>
+                    <div className="text-xs text-gray-500">{teacher.subject}</div>
                   </div>
                 </div>
                 
@@ -1373,6 +1098,7 @@ function AttendanceView({ teachers, attendance }) {
   );
 }
 
+// --- SALARY & PAYROLL VIEW ---
 function SalaryView({ teachers, attendance }) {
   const currentYear = new Date().getFullYear(); 
 
@@ -1389,7 +1115,7 @@ function SalaryView({ teachers, attendance }) {
     return activeTeachers.map(teacher => {
       const recordsThisMonth = attendance.filter(a => 
         a.teacherId === teacher.id && 
-        a.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)
+        a.date?.startsWith(`${year}-${String(month).padStart(2, '0')}`)
       );
 
       let leaveScore = 0; 
@@ -1405,9 +1131,10 @@ function SalaryView({ teachers, attendance }) {
       const paidLeavesUsed = Math.min(leaveScore, paidLeavesAllowed);
       const extraUnpaidLeaves = Math.max(leaveScore - paidLeavesAllowed, 0);
 
-      const perDaySalary = teacher.monthlySalary / daysInMonth;
+      const baseSalary = Number(teacher.monthlySalary) || 0;
+      const perDaySalary = baseSalary / daysInMonth;
       const deductionAmount = extraUnpaidLeaves * perDaySalary;
-      const finalSalary = teacher.monthlySalary - deductionAmount;
+      const finalSalary = baseSalary - deductionAmount;
 
       return {
         ...teacher,
@@ -1458,7 +1185,7 @@ function SalaryView({ teachers, attendance }) {
               <tr className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-xs uppercase tracking-wider text-gray-500">
                 <th className="px-4 py-4 font-semibold">Teacher</th>
                 <th className="px-4 py-4 font-semibold text-right">Base Salary</th>
-                <th className="px-4 py-4 font-semibold text-center bg-gray-50/10">Leaves Taken</th>
+                <th className="px-4 py-4 font-semibold text-center font-medium bg-gray-50/10">Leaves Taken</th>
                 <th className="px-4 py-4 font-semibold text-center text-emerald-600">Paid Lvs Used</th>
                 <th className="px-4 py-4 font-semibold text-center text-rose-600">Unpaid Lvs</th>
                 <th className="px-4 py-4 font-semibold text-right text-rose-600">Deduction</th>
@@ -1469,14 +1196,7 @@ function SalaryView({ teachers, attendance }) {
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {payrollData.map((data, idx) => (
                 <tr key={idx} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                  <td className="px-4 py-4 font-medium flex items-center gap-2">
-                    {data.profilePhoto ? (
-                      <img src={data.profilePhoto} className="w-8 h-8 rounded-full object-cover shadow border" alt="" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-xs text-blue-600 shadow-sm">{data.name.charAt(0)}</div>
-                    )}
-                    <span>{data.name}</span>
-                  </td>
+                  <td className="px-4 py-4 font-medium">{data.name}</td>
                   <td className="px-4 py-4 text-right">Rs. {Number(data.monthlySalary).toLocaleString()}</td>
                   <td className="px-4 py-4 text-center font-medium bg-gray-50/50 dark:bg-gray-800/50">{data.totalLeavesTaken}</td>
                   <td className="px-4 py-4 text-center text-emerald-600">{data.paidLeavesUsed}</td>
@@ -1525,20 +1245,10 @@ function SalaryView({ teachers, attendance }) {
                 </h2>
               </div>
 
-              <div className="grid grid-cols-2 gap-6 mb-8 bg-gray-50 dark:bg-gray-700/30 print:bg-transparent p-4 rounded-lg border border-gray-200 dark:border-gray-600 print:border-none items-center">
-                <div className="flex items-center gap-4 col-span-2 sm:col-span-1">
-                  {slipData.profilePhoto ? (
-                    <img src={slipData.profilePhoto} className="w-20 h-20 rounded-full object-cover shadow border-2 border-blue-500" alt="Teacher Slip" />
-                  ) : (
-                    <div className="w-20 h-20 rounded-full bg-blue-100 flex items-center justify-center font-bold text-3xl text-blue-600 shadow-sm">
-                      {slipData.name.charAt(0)}
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-500 mb-0.5">Employee Name</p>
-                    <p className="font-bold text-lg dark:text-white print:text-black">{slipData.name}</p>
-                    {slipData.jam && <p className="text-xs text-gray-400 font-medium">Class: {slipData.jam}</p>}
-                  </div>
+              <div className="grid grid-cols-2 gap-6 mb-8 bg-gray-50 dark:bg-gray-700/30 print:bg-transparent p-4 rounded-lg border border-gray-200 dark:border-gray-600 print:border-none">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-500 mb-1">Employee Name</p>
+                  <p className="font-bold text-lg dark:text-white print:text-black">{slipData.name}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-500 mb-1">Designation/Subject</p>
@@ -1546,7 +1256,7 @@ function SalaryView({ teachers, attendance }) {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-500 mb-1">Employee ID</p>
-                  <p className="font-semibold dark:text-white print:text-black">EMP-{slipData.id.slice(-4)}</p>
+                  <p className="font-semibold dark:text-white print:text-black">EMP-{slipData.id?.slice(-4)}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 print:text-gray-500 mb-1">Joining Date</p>
