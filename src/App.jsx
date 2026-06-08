@@ -20,7 +20,8 @@ import {
   collection, 
   onSnapshot, 
   addDoc, 
-  updateDoc 
+  updateDoc,
+  deleteDoc, // <--- Ensure comma is there before this line
 } from 'firebase/firestore';
 // ==========================================================
 // MAIN APPLICATION (FIREBASE REMOVED - LOCAL STATE MANAGED)
@@ -35,6 +36,67 @@ export default function App() {
   const [attendance, setAttendance] = useState([]);
   const [fines, setFines] = useState([]);
   const [warnings, setWarnings] = useState([]);
+  // --- LIVE FIREBASE REAL-TIME SYNC SYSTEM ---
+  useEffect(() => {
+    // If the user isn't logged in, or doesn't have a workspaceId, don't run listeners
+    if (!authSession?.workspaceId) return;
+
+    // 1. Sync Live Teachers Collection
+    const unsubscribeTeachers = onSnapshot(
+      collection(db, "teachers"),
+      (snapshot) => {
+        const liveTeachers = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(t => t.workspaceId === authSession.workspaceId);
+        setTeachers(liveTeachers);
+      },
+      (error) => console.error("Teachers Sync Error:", error)
+    );
+
+    // 2. Sync Live Attendance Collection
+    const unsubscribeAttendance = onSnapshot(
+      collection(db, "attendance"),
+      (snapshot) => {
+        const liveAttendance = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(a => a.workspaceId === authSession.workspaceId);
+        setAttendance(liveAttendance);
+      },
+      (error) => console.error("Attendance Sync Error:", error)
+    );
+
+    // 3. Sync Live Fines Collection
+    const unsubscribeFines = onSnapshot(
+      collection(db, "fines"),
+      (snapshot) => {
+        const liveFines = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(f => f.workspaceId === authSession.workspaceId);
+        setFines(liveFines);
+      },
+      (error) => console.error("Fines Sync Error:", error)
+    );
+
+    // 4. Sync Live Warnings Collection
+    const unsubscribeWarnings = onSnapshot(
+      collection(db, "warnings"),
+      (snapshot) => {
+        const liveWarnings = snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(w => w.workspaceId === authSession.workspaceId);
+        setWarnings(liveWarnings);
+      },
+      (error) => console.error("Warnings Sync Error:", error)
+    );
+
+    // Clean up connections automatically when the user logs out
+    return () => {
+      unsubscribeTeachers();
+      unsubscribeAttendance();
+      unsubscribeFines();
+      unsubscribeWarnings();
+    };
+  }, [authSession]);
 
   // --- AUTH SESSION LISTENER EFFECT ---
   useEffect(() => {
@@ -719,7 +781,7 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
     }
   };
 
-  const handleSave = (e) => {
+const handleSave = async (e) => {
     e.preventDefault();
     
     let updatedRemarks = modalObj.id ? (modalObj.salaryRemarksList || []) : [];
@@ -740,13 +802,25 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
       workspaceId: workspaceId 
     };
 
-    if (modalObj.id) {
-       setTeachers(prev => prev.map(t => t.id === modalObj.id ? { ...t, ...data } : t));
-    } else {
-       setTeachers(prev => [...prev, { id: 'teacher_' + Date.now().toString(), ...data }]);
+    try {
+      if (modalObj.id) {
+        // --- UPDATE EXISTING TEACHER IN FIREBASE ---
+        const teacherRef = doc(db, "teachers", modalObj.id);
+        await updateDoc(teacherRef, data);
+        showNotice('Staff member updated successfully');
+      } else {
+        // --- ADD NEW TEACHER TO FIREBASE ---
+        await addDoc(collection(db, "teachers"), {
+          ...data,
+          createdAt: new Date().toISOString()
+        });
+        showNotice('Staff member added successfully');
+      }
+      setModalObj(null);
+    } catch (error) {
+      console.error("Error saving teacher:", error);
+      showNotice('Failed to save staff member', 'error');
     }
-    
-    showNotice('Staff member saved successfully'); setModalObj(null);
   };
 
   const confirmDelete = () => {
@@ -1063,13 +1137,33 @@ function AttendanceTab({ teachers, attendance, setAttendance, workspaceId, showN
   const [leaveStatusMark, setLeaveStatusMark] = useState('Leave');
   const [viewReasonText, setViewReasonText] = useState(null); 
 
-  const mark = (teacherId, status, reason = "") => {
+const mark = async (teacherId, status, reason = "") => {
     const existing = todayAtt.find(a => a?.teacherId === teacherId);
     
-    if (existing) {
-       setAttendance(prev => prev.map(a => a.id === existing.id ? { ...a, status, leaveReason: status === 'Leave' || status === 'Absent' ? reason : "" } : a));
-    } else {
-       setAttendance(prev => [...prev, { id: 'att_' + Date.now().toString(), teacherId, date, status, workspaceId, leaveReason: status === 'Leave' || status === 'Absent' ? reason : "" }]);
+    const data = {
+      teacherId,
+      date,
+      status,
+      workspaceId,
+      leaveReason: status === 'Leave' || status === 'Absent' ? reason : ""
+    };
+
+    try {
+      if (existing) {
+        // --- UPDATE EXISTING ATTENDANCE RECORD IN FIREBASE ---
+        const attRef = doc(db, "attendance", existing.id);
+        await updateDoc(attRef, data);
+      } else {
+        // --- CREATE NEW ATTENDANCE RECORD IN FIREBASE ---
+        await addDoc(collection(db, "attendance"), {
+          ...data,
+          createdAt: new Date().toISOString()
+        });
+      }
+      showNotice(`Marked as ${status}`);
+    } catch (error) {
+      console.error("Error saving attendance:", error);
+      showNotice('Failed to mark attendance', 'error');
     }
   };
 
@@ -1241,38 +1335,63 @@ function FineTab({ teachers, fines, setFines, workspaceId, showNotice }) {
   const activeTeachers = teachers.filter(t => t?.status === 'Active');
   const sortedFines = [...fines].sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  const handleSaveFine = (e) => {
+  const handleSaveFine = async (e) => {
     e.preventDefault();
     if (!selectedTeacher || !amount) return showNotice("Please fill required fields", "error");
 
-    setFines(prev => [...prev, {
-      id: 'fine_' + Date.now().toString(),
-      teacherId: selectedTeacher, date, amount: Number(amount),
-      reason: reason || "No specific reason provided.", workspaceId
-    }]);
+    const data = {
+      teacherId: selectedTeacher, 
+      date, 
+      amount: Number(amount),
+      reason: reason || "No specific reason provided.", 
+      workspaceId,
+      createdAt: new Date().toISOString()
+    };
 
-    showNotice('Fine recorded successfully!');
-    setSelectedTeacher(""); setAmount(""); setReason("");
+    try {
+      // --- ADD NEW FINE TO FIREBASE ---
+      await addDoc(collection(db, "fines"), data);
+      showNotice('Fine recorded successfully!');
+      setSelectedTeacher(""); setAmount(""); setReason("");
+    } catch (error) {
+      console.error("Error saving fine:", error);
+      showNotice('Failed to record fine', 'error');
+    }
   };
 
-  const handleUpdateFine = (e) => {
+  const handleUpdateFine = async (e) => {
     e.preventDefault();
-    setFines(prev => prev.map(f => f.id === editFineObj.id ? { 
-        ...f, 
-        date: e.target.editDate.value, 
-        amount: Number(e.target.editAmount.value), 
-        reason: e.target.editReason.value 
-    } : f));
     
-    showNotice('Fine updated successfully!'); setEditFineObj(null);
+    const data = {
+      date: e.target.editDate.value, 
+      amount: Number(e.target.editAmount.value), 
+      reason: e.target.editReason.value 
+    };
+
+    try {
+      // --- UPDATE EXISTING FINE IN FIREBASE ---
+      const fineRef = doc(db, "fines", editFineObj.id);
+      await updateDoc(fineRef, data);
+      showNotice('Fine updated successfully!'); 
+      setEditFineObj(null);
+    } catch (error) {
+      console.error("Error updating fine:", error);
+      showNotice('Failed to update fine', 'error');
+    }
   };
 
-  const confirmDeleteFine = () => {
-    setFines(prev => prev.filter(f => f.id !== fineToDelete));
-    showNotice('Fine deleted successfully');
-    setFineToDelete(null);
+  const confirmDeleteFine = async () => {
+    try {
+      // --- DELETE FINE FROM FIREBASE ---
+      const fineRef = doc(db, "fines", fineToDelete);
+      await deleteDoc(fineRef);
+      showNotice('Fine deleted successfully');
+      setFineToDelete(null);
+    } catch (error) {
+      console.error("Error deleting fine:", error);
+      showNotice('Failed to delete fine', 'error');
+    }
   };
-
   return (
     <div className="space-y-6 animate-in fade-in pb-20">
       <div className="bg-white dark:bg-slate-900 p-5 sm:p-8 rounded-3xl shadow-sm border border-slate-200 dark:border-slate-800">
@@ -1649,17 +1768,35 @@ function SalaryTab({ teachers, attendance, fines, warnings, setWarnings, workspa
     });
   }, [teachers, attendance, fines, warnings, month]);
 
-  const handleSaveWarning = (e) => {
+ const handleSaveWarning = async (e) => {
     e.preventDefault();
     
-    if (warningModalObj.warningRecord?.id) {
-       setWarnings(prev => prev.map(w => w.id === warningModalObj.warningRecord.id ? { ...w, message: warningText } : w));
-    } else {
-       setWarnings(prev => [...prev, { id: 'warn_' + Date.now().toString(), teacherId: warningModalObj.id, month, message: warningText, workspaceId }]);
-    }
+    const data = {
+      teacherId: warningModalObj.id,
+      month,
+      message: warningText,
+      workspaceId,
+      updatedAt: new Date().toISOString()
+    };
 
-    showNotice('Warning message saved!');
-    setWarningModalObj(null);
+    try {
+      if (warningModalObj.warningRecord?.id) {
+        // --- UPDATE EXISTING WARNING RECORD IN FIREBASE ---
+        const warnRef = doc(db, "warnings", warningModalObj.warningRecord.id);
+        await updateDoc(warnRef, { message: warningText, updatedAt: data.updatedAt });
+      } else {
+        // --- CREATE NEW WARNING RECORD IN FIREBASE ---
+        await addDoc(collection(db, "warnings"), {
+          ...data,
+          createdAt: new Date().toISOString()
+        });
+      }
+      showNotice('Warning message saved!');
+      setWarningModalObj(null);
+    } catch (error) {
+      console.error("Error saving warning:", error);
+      showNotice('Failed to save warning', 'error');
+    }
   };
 
   return (
