@@ -1,22 +1,21 @@
-// src/firebase.js
+// firebase.js
 import { initializeApp } from "firebase/app";
-// Import the specific SDKs you need for Auth and Database
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyDzdiia6x_JtqLNa2HXA_ryljXrjIyg6v4",
-  authDomain: "school-portal-69e2b.firebaseapp.com",
-  projectId: "school-portal-69e2b",
-  storageBucket: "school-portal-69e2b.firebasestorage.app",
-  messagingSenderId: "825534501732",
-  appId: "1:825534501732:web:c7ca75d1f386d4a19fe071"
+  apiKey: "AIzaSyAMQyjDT-1Ahb9ogP1pGM_yMBbdMx_6AvI",
+  authDomain: "staff-management-app-e1d03.firebaseapp.com",
+  projectId: "staff-management-app-e1d03",
+  storageBucket: "staff-management-app-e1d03.firebasestorage.app",
+  messagingSenderId: "904573698326",
+  appId: "1:904573698326:web:93324a918c7de2cff09037"
 };
 
-// Initialize Firebase Core
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Authentication and Firestore Database, then EXPORT them
+// Initialize and Export the services so we can use them in App.jsx
 export const auth = getAuth(app);
 export const db = getFirestore(app);
