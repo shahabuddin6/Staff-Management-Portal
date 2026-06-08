@@ -768,22 +768,7 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
     setRemarkText("");
   };
 
-const handlePhotoUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      if (file.size > 1.2 * 1024 * 1024) {
-        showNotice("Image size must be less than 1.2MB", "error");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        // Yeh line image ko convert karke direct photoPreview mein daal degi
-        // Aur aapka form seedha yahan se photo utha lega!
-        setPhotoPreview(reader.result); 
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+
 const handleSave = async (e) => {
     e.preventDefault();
     
@@ -1734,6 +1719,21 @@ function DeductionReportTab({ teachers, attendance, fines }) {
     </div>
   );
 }
+const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 1.2 * 1024 * 1024) {
+        showNotice("Image size must be less than 1.2MB", "error");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Image ko text format mein convert karke preview mein daal raha hai
+        setPhotoPreview(reader.result); 
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
 function SalaryTab({ teachers, attendance, fines, warnings, setWarnings, workspaceId, instituteName, showNotice }) {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -1760,19 +1760,25 @@ function SalaryTab({ teachers, attendance, fines, warnings, setWarnings, workspa
       let halfDayCount = 0;
       let lateCount = 0;
 
-      tAtt.forEach(r => {
+ tAtt.forEach(r => {
         if(r.status === 'Absent') absentCount++;
         if(r.status === 'Leave') leaveCount++;
         if(r.status === 'Half Day') halfDayCount += 0.5;
         if(r.status === 'Late') lateCount++;
       });
 
+      // 1. Total chuttian kitni haseel keen (Absent + Leave)
       const totalLeavesTaken = absentCount + leaveCount;
+      
+      // 2. YAHAN 1 CHUTTI ALLOWED KA LOGIC HAI:
+      // Agar total chuttian 1 se zyada hain, toh 1 minus ho jayegi.
+      // Yani pehli chutti free, doosri chutti se deduction shuru!
       const unpaidLeavesCount = Math.max(0, totalLeavesTaken - 1); 
       
+      // 3. Total deduction days mein unpaid chuttian aur Half Day jama honge
       const totalDeductionDays = unpaidLeavesCount + halfDayCount;
-      const base = Number(t.salary) || 0;
       
+      const base = Number(t.salary) || 0;
       const perDaySalary = base / daysInMonth;
       const leavesDeductionAmount = totalDeductionDays * perDaySalary;
       
