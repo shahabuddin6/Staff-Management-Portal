@@ -768,7 +768,7 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
     setRemarkText("");
   };
 
-  const handlePhotoUpload = (e) => {
+const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
       if (file.size > 1.2 * 1024 * 1024) {
@@ -776,11 +776,14 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
         return;
       }
       const reader = new FileReader();
-      reader.onloadend = () => setPhotoPreview(reader.result);
+      reader.onloadend = () => {
+        // Yeh line image ko convert karke direct photoPreview mein daal degi
+        // Aur aapka form seedha yahan se photo utha lega!
+        setPhotoPreview(reader.result); 
+      };
       reader.readAsDataURL(file);
     }
   };
-
 const handleSave = async (e) => {
     e.preventDefault();
     
