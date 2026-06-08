@@ -21,7 +21,7 @@ import {
   onSnapshot, 
   addDoc, 
   updateDoc,
-  deleteDoc, // <--- Ensure comma is there before this line
+  deleteDoc // <--- Ensure comma is there before this line
 } from 'firebase/firestore';
 // ==========================================================
 // MAIN APPLICATION (FIREBASE REMOVED - LOCAL STATE MANAGED)
@@ -823,10 +823,30 @@ const handleSave = async (e) => {
     }
   };
 
-  const confirmDelete = () => {
-    setTeachers(prev => prev.filter(t => t.id !== teacherToDelete.id));
-    showNotice('Staff member deleted successfully');
-    setTeacherToDelete(null);
+ const confirmDelete = async () => {
+    if (!teacherToDelete) return;
+
+    try {
+      // Dono suraton mein ID nikalne ki koshish karte hain
+      const teacherId = typeof teacherToDelete === 'object' ? teacherToDelete.id : teacherToDelete;
+      
+      console.log("Deleting teacher with ID:", teacherId); // <-- Yeh check karne ke liye
+
+      if (!teacherId) {
+        showNotice('Invalid Teacher ID', 'error');
+        return;
+      }
+
+      // --- DELETE FROM FIREBASE ---
+      const teacherRef = doc(db, "teachers", teacherId);
+      await deleteDoc(teacherRef);
+      
+      showNotice('Teacher deleted successfully');
+      setTeacherToDelete(null); 
+    } catch (error) {
+      console.error("Firebase Delete Error Detail:", error); // <-- Yeh asli error batayega
+      showNotice('Failed to delete teacher', 'error');
+    }
   };
 
   return (
