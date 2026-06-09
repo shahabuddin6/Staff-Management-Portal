@@ -770,13 +770,28 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
 
 
 const handleSave = async (e) => {
-    e.preventDefault();
+   e.preventDefault();
     
     let updatedRemarks = modalObj.id ? (modalObj.salaryRemarksList || []) : [];
     if (remarkText.trim() !== "") {
       updatedRemarks = [...updatedRemarks, { text: remarkText, date: new Date().toISOString() }];
     }
 
+    // 1. Live form se direct image file nikalte hain
+    const imageInput = e.target.querySelector('input[type="file"]');
+    const imageFile = imageInput?.files[0];
+    let base64Photo = photoPreview || ""; // Agar pehle se koi photo ka preview hai
+
+    // 2. Agar user ne nayi file select ki hai, toh submit ke waqt convert hone ka wait karega
+    if (imageFile) {
+      base64Photo = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(imageFile);
+        reader.onload = () => resolve(reader.result);
+      });
+    }
+
+    // 3. Ab aapka data object jo 100% photo lekar Firebase mein jayega
     const data = {
       name: e.target.name.value, 
       email: e.target.email.value || "", 
@@ -785,11 +800,10 @@ const handleSave = async (e) => {
       salary: Number(e.target.salary.value) || 0, 
       joiningDate: e.target.joiningDate.value, 
       status: e.target.status.value,
-      salaryRemarksList: updatedRemarks, 
-      photo: photoPreview,
+      salaryRemarksList: updatedRemarks || [], 
+      photo: base64Photo, // <--- Ab isme 100% image ka data jayega!
       workspaceId: workspaceId 
     };
-
     try {
       if (modalObj.id) {
         // --- UPDATE EXISTING TEACHER IN FIREBASE ---
@@ -928,10 +942,20 @@ const handleSave = async (e) => {
                     <User size={40} />
                   </div>
                 )}
-                <label className="absolute bottom-0 right-0 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full cursor-pointer shadow-lg transition-transform hover:scale-105 active:scale-95">
-                  <Camera size={16} />
-                  <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
-                </label>
+                <label 
+  htmlFor="teacher-photo-input" 
+  className="absolute bottom-0 right-0 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full cursor-pointer shadow-lg transition-transform hover:scale-105 active:scale-95"
+>
+  <Camera size={16} />
+  <input 
+    id="teacher-photo-input"
+    name="photo" // <-- Iski wajah se database mein save hogi
+    type="file" 
+    accept="image/*" 
+    onChange={handlePhotoUpload} 
+    className="sr-only" // <-- 'hidden' ki jagah 'sr-only' lagaya taake click block na ho!
+  />
+</label>
               </div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Upload Photo (Max 1.2MB)</p>
             </div>
@@ -1728,13 +1752,19 @@ const handlePhotoUpload = (e) => {
       }
       const reader = new FileReader();
       reader.onloadend = () => {
-        // Image ko text format mein convert karke preview mein daal raha hai
+        // 1. Yeh screen par photo ka preview dikhaye ga
         setPhotoPreview(reader.result); 
+        
+        // 2. YEH LINE JAADU KAREGI: Yeh aapke form ke andar chupi hui photo input mein 
+        // direct converted text daal degi taake submit hote waqt photo automatically chali jaye!
+        const photoInput = document.querySelector('input[type="file"][accept="image/*"]');
+        if (photoInput) {
+          photoInput.setAttribute('data-base64', reader.result);
+        }
       };
       reader.readAsDataURL(file);
     }
   };
-
 function SalaryTab({ teachers, attendance, fines, warnings, setWarnings, workspaceId, instituteName, showNotice }) {
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [slipData, setSlipData] = useState(null);
