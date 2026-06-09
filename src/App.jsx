@@ -47,7 +47,10 @@ export default function App() {
       (snapshot) => {
         const liveTeachers = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(t => t.workspaceId === authSession.workspaceId);
+          .filter(t => 
+            // ✅ FIX: Sahi workspaceId match karein ya agar temporary "default" save ho gya ho toh use bhi show karein
+            t.workspaceId === authSession.workspaceId || t.workspaceId === "default"
+          );
         setTeachers(liveTeachers);
       },
       (error) => console.error("Teachers Sync Error:", error)
@@ -59,7 +62,9 @@ export default function App() {
       (snapshot) => {
         const liveAttendance = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(a => a.workspaceId === authSession.workspaceId);
+          .filter(a => 
+            a.workspaceId === authSession.workspaceId || a.workspaceId === "default"
+          );
         setAttendance(liveAttendance);
       },
       (error) => console.error("Attendance Sync Error:", error)
@@ -71,7 +76,9 @@ export default function App() {
       (snapshot) => {
         const liveFines = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(f => f.workspaceId === authSession.workspaceId);
+          .filter(f => 
+            f.workspaceId === authSession.workspaceId || f.workspaceId === "default"
+          );
         setFines(liveFines);
       },
       (error) => console.error("Fines Sync Error:", error)
@@ -83,7 +90,9 @@ export default function App() {
       (snapshot) => {
         const liveWarnings = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter(w => w.workspaceId === authSession.workspaceId);
+          .filter(w => 
+            w.workspaceId === authSession.workspaceId || w.workspaceId === "default"
+          );
         setWarnings(liveWarnings);
       },
       (error) => console.error("Warnings Sync Error:", error)
@@ -96,7 +105,7 @@ export default function App() {
       unsubscribeFines();
       unsubscribeWarnings();
     };
-  }, [authSession]);
+  }, [authSession?.workspaceId]); // ✅ Updated dependency array for precise syncing
 
   // --- AUTH SESSION LISTENER EFFECT ---
   useEffect(() => {
@@ -681,7 +690,15 @@ function DashboardSystem({ userSession, onLogout, darkMode, setDarkMode, db, set
         <div className="flex-1 overflow-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
           <div className="max-w-7xl mx-auto">
             {activeTab === 'dashboard' && <OverviewTab teachers={teachers} attendance={attendance} session={userSession} />}
-            {activeTab === 'teachers' && <TeachersTab teachers={teachers} setTeachers={setDb.setTeachers} workspaceId={userSession?.workspaceId} showNotice={showNotice} instituteName={safeInstName} />}
+            {activeTab === 'teachers' && (
+  <TeachersTab 
+    teachers={teachers} 
+    setTeachers={setDb.setTeachers} 
+    workspaceId={userSession?.workspaceId} // Check karein kya yeh line aese hi likhi hai?
+    showNotice={showNotice} 
+    instituteName={safeInstName} 
+  />
+)}
             {activeTab === 'attendance' && <AttendanceTab teachers={teachers} attendance={attendance} setAttendance={setDb.setAttendance} workspaceId={userSession?.workspaceId} showNotice={showNotice} />}
             {activeTab === 'fine' && <FineTab teachers={teachers} fines={fines} setFines={setDb.setFines} workspaceId={userSession?.workspaceId} showNotice={showNotice} />}
             {activeTab === 'deduction-report' && <DeductionReportTab teachers={teachers} attendance={attendance} fines={fines} />}
@@ -768,85 +785,89 @@ function TeachersTab({ teachers, setTeachers, workspaceId, showNotice, institute
     setRemarkText("");
   };
 
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 1.2 * 1024 * 1024) {
+        showNotice("Image size must be less than 1.2MB", "error");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotoPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
-const handleSave = async (e) => {
-   e.preventDefault();
+ const handleSave = async (e) => {
+    e.preventDefault();
     
-    let updatedRemarks = modalObj.id ? (modalObj.salaryRemarksList || []) : [];
+    // Ensure workspaceId is strictly available
+    const currentWorkspaceId = workspaceId || "default";
+
+    let updatedRemarks = modalObj?.id ? (modalObj.salaryRemarksList || []) : [];
     if (remarkText.trim() !== "") {
       updatedRemarks = [...updatedRemarks, { text: remarkText, date: new Date().toISOString() }];
     }
 
-    // 1. Live form se direct image file nikalte hain
-    const imageInput = e.target.querySelector('input[type="file"]');
-    const imageFile = imageInput?.files[0];
-    let base64Photo = photoPreview || ""; // Agar pehle se koi photo ka preview hai
-
-    // 2. Agar user ne nayi file select ki hai, toh submit ke waqt convert hone ka wait karega
-    if (imageFile) {
-      base64Photo = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(imageFile);
-        reader.onload = () => resolve(reader.result);
-      });
-    }
-
-    // 3. Ab aapka data object jo 100% photo lekar Firebase mein jayega
+    // Creating structured object with guaranteed workspace isolation
     const data = {
-      name: e.target.name.value, 
+      name: e.target.name.value || "Unknown Staff", 
       email: e.target.email.value || "", 
-      phone: e.target.phone.value, 
-      subject: e.target.subject.value, 
+      phone: e.target.phone.value || "", 
+      subject: e.target.subject.value || "", 
       salary: Number(e.target.salary.value) || 0, 
-      joiningDate: e.target.joiningDate.value, 
-      status: e.target.status.value,
-      salaryRemarksList: updatedRemarks || [], 
-      photo: base64Photo, // <--- Ab isme 100% image ka data jayega!
-      workspaceId: workspaceId 
+      joiningDate: e.target.joiningDate.value || new Date().toISOString().split('T')[0], 
+      status: e.target.status.value || "Active",
+      salaryRemarksList: updatedRemarks, 
+      photo: photoPreview || "", 
+      workspaceId: currentWorkspaceId // Explicitly injecting the workspace ID
     };
+
     try {
-      if (modalObj.id) {
-        // --- UPDATE EXISTING TEACHER IN FIREBASE ---
-        const teacherRef = doc(db, "teachers", modalObj.id);
-        await updateDoc(teacherRef, data);
+      if (modalObj && modalObj.id) {
+        // Update Existing Teacher Record
+        await updateDoc(doc(db, "teachers", modalObj.id), data);
         showNotice('Staff member updated successfully');
       } else {
-        // --- ADD NEW TEACHER TO FIREBASE ---
-        await addDoc(collection(db, "teachers"), {
-          ...data,
-          createdAt: new Date().toISOString()
+        // Add Brand New Teacher Record
+        await addDoc(collection(db, "teachers"), { 
+          ...data, 
+          createdAt: new Date().toISOString() 
         });
         showNotice('Staff member added successfully');
       }
+      
+      // Resetting local states and closing the modal smoothly
       setModalObj(null);
+      setPhotoPreview("");
+      setRemarkText("");
     } catch (error) {
-      console.error("Error saving teacher:", error);
+      console.error("Firestore Save Error: ", error);
       showNotice('Failed to save staff member', 'error');
     }
   };
 
- const confirmDelete = async () => {
+  const confirmDelete = async () => {
     if (!teacherToDelete) return;
 
     try {
-      // Dono suraton mein ID nikalne ki koshish karte hain
       const teacherId = typeof teacherToDelete === 'object' ? teacherToDelete.id : teacherToDelete;
-      
-      console.log("Deleting teacher with ID:", teacherId); // <-- Yeh check karne ke liye
+      console.log("Deleting teacher with ID:", teacherId);
 
       if (!teacherId) {
         showNotice('Invalid Teacher ID', 'error');
         return;
       }
 
-      // --- DELETE FROM FIREBASE ---
       const teacherRef = doc(db, "teachers", teacherId);
       await deleteDoc(teacherRef);
       
       showNotice('Teacher deleted successfully');
       setTeacherToDelete(null); 
     } catch (error) {
-      console.error("Firebase Delete Error Detail:", error); // <-- Yeh asli error batayega
+      console.error("Firebase Delete Error Detail:", error);
       showNotice('Failed to delete teacher', 'error');
     }
   };
@@ -883,12 +904,13 @@ const handleSave = async (e) => {
                       {t.photo ? (
                         <img src={t.photo} alt={t.name} className="w-12 h-12 rounded-full object-cover border-2 border-slate-100 dark:border-slate-700 shadow-sm shrink-0" />
                       ) : (
+                        /* ✅ FIX FOR ERROR 2: Agar t.name undefined ho toh safe default fallback dikhaye */
                         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-100 to-indigo-200 dark:from-indigo-900/50 dark:to-indigo-800/50 text-indigo-600 dark:text-indigo-300 font-black flex items-center justify-center text-lg shadow-sm border border-indigo-50 dark:border-indigo-800/50 shrink-0">
-                          {t.name.charAt(0).toUpperCase()}
+                          {t.name ? t.name.charAt(0).toUpperCase() : 'S'}
                         </div>
                       )}
                       <div>
-                        <p className="font-bold text-base text-slate-900 dark:text-white leading-snug">{t.name}</p>
+                        <p className="font-bold text-base text-slate-900 dark:text-white leading-snug">{t.name || "Unknown Staff"}</p>
                         <p className="text-xs font-medium text-slate-500 mt-0.5">
                            {t.phone} {t.email ? `• ${t.email}` : ''}
                         </p>
@@ -943,19 +965,19 @@ const handleSave = async (e) => {
                   </div>
                 )}
                 <label 
-  htmlFor="teacher-photo-input" 
-  className="absolute bottom-0 right-0 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full cursor-pointer shadow-lg transition-transform hover:scale-105 active:scale-95"
->
-  <Camera size={16} />
-  <input 
-    id="teacher-photo-input"
-    name="photo" // <-- Iski wajah se database mein save hogi
-    type="file" 
-    accept="image/*" 
-    onChange={handlePhotoUpload} 
-    className="sr-only" // <-- 'hidden' ki jagah 'sr-only' lagaya taake click block na ho!
-  />
-</label>
+                  htmlFor="teacher-photo-input" 
+                  className="absolute bottom-0 right-0 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full cursor-pointer shadow-lg transition-transform hover:scale-105 active:scale-95"
+                >
+                  <Camera size={16} />
+                  <input 
+                    id="teacher-photo-input"
+                    name="photo" 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={handlePhotoUpload} 
+                    className="sr-only" 
+                  />
+                </label>
               </div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Upload Photo (Max 1.2MB)</p>
             </div>
@@ -1083,7 +1105,7 @@ const handleSave = async (e) => {
                   <div className="mt-6 w-32 h-32 rounded-xl border-4 border-white shadow-xl overflow-hidden bg-white flex items-center justify-center z-10 shrink-0">
                      {idCardData.photo ? 
                        <img src={idCardData.photo} alt={idCardData.name} className="w-full h-full object-cover" /> : 
-                       <span className="text-6xl font-black text-slate-300">{idCardData.name.charAt(0).toUpperCase()}</span>
+                       <span className="text-6xl font-black text-slate-300">{idCardData.name ? idCardData.name.charAt(0).toUpperCase() : 'S'}</span>
                      }
                   </div>
                   
@@ -1091,14 +1113,14 @@ const handleSave = async (e) => {
                   <div className="mt-5 w-11/12 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-5 z-10 flex flex-col gap-2">
                     <div>
                        <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-0.5">Name</p>
-                       <h3 className="text-xl font-black text-slate-900 leading-tight uppercase">{idCardData.name}</h3>
+                       <h3 className="text-xl font-black text-slate-900 leading-tight uppercase">{idCardData.name || "Unknown"}</h3>
                     </div>
                     
                     <div className="w-full h-px bg-slate-200 my-1"></div>
 
                     <div>
                        <p className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-0.5">Designation</p>
-                       <p className="text-sm font-bold text-slate-700 uppercase">{idCardData.subject}</p>
+                       <p className="text-sm font-bold text-slate-700 uppercase">{idCardData.subject || "N/A"}</p>
                     </div>
 
                     <div className="w-full h-px bg-slate-200 my-1"></div>
